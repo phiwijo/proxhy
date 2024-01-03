@@ -112,6 +112,7 @@ class ProxyClient(Client):
         self.rq_game = Game()
 
         self.players: dict[str, str] = {}
+        self.players_old: dict[str, str] = {}
         self.players_getting_stats = []
         self.players_with_stats = {}
         self.teams: list[Team] = Teams()
@@ -245,6 +246,7 @@ class ProxyClient(Client):
     async def packet_join_game(self, buff: Buffer):
         # flush player lists
         self.players.clear()
+        self.players_old.clear()
         self.players_with_stats.clear()
 
         self.send_packet(self.client_stream, 0x01, buff.getvalue())
@@ -258,9 +260,6 @@ class ProxyClient(Client):
 
         eid = buff.unpack(VarInt)
         uuid = buff.unpack(UUID)
-        if uuid in self.players:
-            name = self.players[uuid]["name"]
-            print(f"Player {name} spawned!")
 
     @listen_server(0x3E, blocking=True)
     async def packet_teams(self, buff: Buffer):
@@ -403,7 +402,6 @@ class ProxyClient(Client):
                 properties = {}
                 for _ in range(nr_properties):
                     prop_name = buff.unpack(String)
-                    print(prop_name)
                     prop_value = buff.unpack(String)
                     prop_signed = buff.unpack(Boolean)
                     if prop_signed:
@@ -415,6 +413,7 @@ class ProxyClient(Client):
                 display_name = buff.unpack(Boolean)
                 if display_name:
                     display_name = buff.unpack(Chat)
+                self.players_old[_uuid] = name
 
                 self.players[_uuid] = {
                     "name": name,
@@ -428,7 +427,6 @@ class ProxyClient(Client):
                 self.players[_uuid]["gamemode"] = gamemode
             elif action == 2:  # update latency
                 latency = buff.unpack(VarInt)
-                print(f"Player {self.players[_uuid]['name']} has latency {latency}")
                 self.players[_uuid]["ping"] = latency
             elif action == 3:  # update display name
                 display_name = buff.unpack(Boolean)
@@ -438,6 +436,7 @@ class ProxyClient(Client):
             elif action == 4:  # remove player
                 try:
                     del self.players[_uuid]
+                    del self.players_old[_uuid]
                 except KeyError:
                     pass  # some things fail idk
 
@@ -566,7 +565,7 @@ class ProxyClient(Client):
                     player.name = player.player
                     player.uuid = next(
                         u
-                        for u, p in self.players.items()
+                        for u, p in self.players_old.items()
                         if p.casefold() == player.player.casefold()
                     )
                 elif isinstance(player, InvalidApiKey):
@@ -582,7 +581,7 @@ class ProxyClient(Client):
                     print(f"An unknown error occurred! ({player})")  # TODO
                     continue
 
-                if player.name in self.players.values():
+                if player.name in self.players_old.values():
                     if not isinstance(player, PlayerNotFound):  # nick, probably
                         fplayer = FormattedPlayer(player)
 

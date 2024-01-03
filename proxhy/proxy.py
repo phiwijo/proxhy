@@ -55,12 +55,13 @@ class ProxyThread(QThread):
         self.newPlayer.emit(player_info)
 
 class Proxy(QObject):
-
-    def __init__(self, proxy_thread: ProxyThread, parent: QObject | None = None) -> None:
+    def __init__(
+        self, proxy_thread: ProxyThread, parent: QObject | None = None
+    ) -> None:
         super().__init__(parent)
         self.proxy_thread = proxy_thread
         self.host = "localhost"  # Set your desired host
-        self.port = 13876  # Set your desired port
+        self.port = 25565  # Set your desired port
 
     def run(self) -> None:
         self.loop = asyncio.new_event_loop()
@@ -69,13 +70,16 @@ class Proxy(QObject):
         self.loop.run_until_complete(self.start())
 
     async def handle_client(self, reader: StreamReader, writer: StreamWriter):
-        ProxyClient(reader, writer, self.proxy_thread)  # Make sure ProxyClient is correctly defined
+        ProxyClient(
+            reader, writer, self.proxy_thread
+        )  # Make sure ProxyClient is correctly defined
 
     async def start(self):
         await load_auth_info()
         server = await asyncio.start_server(self.handle_client, self.host, self.port)
         async with server:
             await server.serve_forever()
+
 
 class ProxyClient(Client):
     # load favicon
@@ -94,7 +98,9 @@ class ProxyClient(Client):
         "favicon": f"data:image/png;base64,{b64_favicon}",
     }
 
-    def __init__(self, reader: StreamReader, writer: StreamWriter, proxy_thread: ProxyThread):
+    def __init__(
+        self, reader: StreamReader, writer: StreamWriter, proxy_thread: ProxyThread
+    ):
         super().__init__(reader=reader, writer=writer)
 
         self.proxy_thread = proxy_thread
@@ -111,7 +117,6 @@ class ProxyClient(Client):
         self.teams: list[Team] = Teams()
 
         self.waiting_for_locraw = False
-        
 
     async def close(self):
         if self.server_stream:
@@ -246,6 +251,16 @@ class ProxyClient(Client):
 
         self.waiting_for_locraw = True
         self.send_packet(self.server_stream, 0x01, String.pack("/locraw"))
+
+    @listen_server(0x0C)
+    async def packet_spawn_player(self, buff: Buffer):
+        self.send_packet(self.client_stream, 0x0C, buff.getvalue())
+
+        eid = buff.unpack(VarInt)
+        uuid = buff.unpack(UUID)
+        if uuid in self.players:
+            name = self.players[uuid]["name"]
+            print(f"Player {name} spawned!")
 
     @listen_server(0x3E, blocking=True)
     async def packet_teams(self, buff: Buffer):
@@ -384,7 +399,42 @@ class ProxyClient(Client):
             _uuid = buff.unpack(UUID)
             if action == 0:  # add player
                 name = buff.unpack(String)
-                self.players[_uuid] = name
+                nr_properties = buff.unpack(VarInt)
+                properties = {}
+                for _ in range(nr_properties):
+                    prop_name = buff.unpack(String)
+                    print(prop_name)
+                    prop_value = buff.unpack(String)
+                    prop_signed = buff.unpack(Boolean)
+                    if prop_signed:
+                        prop_signature = buff.unpack(String)
+                    properties[prop_name] = (prop_value, prop_signed, prop_signature)
+
+                gamemode = buff.unpack(VarInt)
+                ping = buff.unpack(VarInt)
+                display_name = buff.unpack(Boolean)
+                if display_name:
+                    display_name = buff.unpack(Chat)
+
+                self.players[_uuid] = {
+                    "name": name,
+                    "gamemode": gamemode,
+                    "ping": ping,
+                    "display_name": display_name,
+                    "properties": properties,
+                }
+            elif action == 1:  # update gamemode
+                gamemode = buff.unpack(VarInt)
+                self.players[_uuid]["gamemode"] = gamemode
+            elif action == 2:  # update latency
+                latency = buff.unpack(VarInt)
+                print(f"Player {self.players[_uuid]['name']} has latency {latency}")
+                self.players[_uuid]["ping"] = latency
+            elif action == 3:  # update display name
+                display_name = buff.unpack(Boolean)
+                if display_name:
+                    display_name = buff.unpack(Chat)
+                self.players[_uuid]["display_name"] = display_name
             elif action == 4:  # remove player
                 try:
                     del self.players[_uuid]
@@ -410,11 +460,12 @@ class ProxyClient(Client):
     async def garlicbread(self):  # Mmm, garlic bread.
         self.proxy_thread.sendNewPlayer("Mmm, garlic bread.")  # Mmm, garlic bread.
         return "§eMmm, garlic bread."  # Mmm, garlic bread.
-    
+
     @command("c")
-    async def check(self):
-        self.proxy_thread.sendNewPlayer(["Seifig"])
-        return "§eChecking player on overlay"
+    async def check(self, ign=None, mode=None,*stats):
+        ign = ign or self.username
+        self.proxy_thread.sendNewPlayer([f"{ign}"])
+        return f"§eChecking player on overlay "
     
 
 

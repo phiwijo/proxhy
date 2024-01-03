@@ -1,4 +1,5 @@
 import asyncio
+from asyncio import StreamReader, StreamWriter
 import base64
 import json
 import re
@@ -35,7 +36,46 @@ from .encryption import Stream, generate_verification_hash, pkcs1_v15_padded_rsa
 from .errors import CommandException
 from .formatting import FormattedPlayer
 from .models import Game, Team, Teams
+from PyQt5.QtCore import QObject, QThread, pyqtSignal
 
+class ProxyThread(QThread):
+    newPlayer = pyqtSignal(object)  # Define a signal to emit new player information
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def run(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        proxy = Proxy(self)
+        loop.run_until_complete(proxy.start())
+
+    def sendNewPlayer(self, player_info):
+        self.newPlayer.emit(player_info)
+
+class Proxy(QObject):
+
+    def __init__(self, proxy_thread: ProxyThread, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self.proxy_thread = proxy_thread
+        self.host = "localhost"  # Set your desired host
+        self.port = 13876  # Set your desired port
+
+    def run(self) -> None:
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+
+        self.loop.run_until_complete(self.start())
+
+    async def handle_client(self, reader: StreamReader, writer: StreamWriter):
+        ProxyClient(reader, writer, self.proxy_thread)  # Make sure ProxyClient is correctly defined
+
+    async def start(self):
+        await load_auth_info()
+        server = await asyncio.start_server(self.handle_client, self.host, self.port)
+        async with server:
+            await server.serve_forever()
 
 class ProxyClient(Client):
     # load favicon
@@ -50,12 +90,14 @@ class ProxyClient(Client):
             "max": 1,
             "online": 0,
         },
-        "description": {"text": "Proxhy"},
+        "description": {"text": "§6§lPolsuOverlay's Proxy §rpowered by §lphroxy"},
         "favicon": f"data:image/png;base64,{b64_favicon}",
     }
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, reader: StreamReader, writer: StreamWriter, proxy_thread: ProxyThread):
+        super().__init__(reader=reader, writer=writer)
+
+        self.proxy_thread = proxy_thread
 
         self.client = ""
         self.hypixel_client = None
@@ -69,6 +111,7 @@ class ProxyClient(Client):
         self.teams: list[Team] = Teams()
 
         self.waiting_for_locraw = False
+        
 
     async def close(self):
         if self.server_stream:
@@ -365,7 +408,15 @@ class ProxyClient(Client):
 
     @command()  # Mmm, garlic bread.
     async def garlicbread(self):  # Mmm, garlic bread.
+        self.proxy_thread.sendNewPlayer("Mmm, garlic bread.")  # Mmm, garlic bread.
         return "§eMmm, garlic bread."  # Mmm, garlic bread.
+    
+    @command("c")
+    async def check(self):
+        self.proxy_thread.sendNewPlayer(["Seifig"])
+        return "§eChecking player on overlay"
+    
+
 
     @command("sc")
     async def statcheck(self, ign=None, mode=None, *stats):

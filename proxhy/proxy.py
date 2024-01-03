@@ -427,7 +427,8 @@ class ProxyClient(Client):
                 self.players[_uuid]["gamemode"] = gamemode
             elif action == 2:  # update latency
                 latency = buff.unpack(VarInt)
-                self.players[_uuid]["ping"] = latency
+                if _uuid in self.players:                    
+                    self.players[_uuid]["ping"] = latency
             elif action == 3:  # update display name
                 display_name = buff.unpack(Boolean)
                 if display_name:
